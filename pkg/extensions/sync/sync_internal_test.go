@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
@@ -2675,5 +2676,78 @@ func TestOnDemandShouldCheckUpstreamManifest(t *testing.T) {
 		onDemand.Add(&mockCheckService{})
 
 		So(onDemand.ShouldCheckUpstreamManifest("repo", "latest"), ShouldBeTrue)
+	})
+}
+
+func TestDisableHTTP2(t *testing.T) {
+	// tlsVerify is left off so the request also exercises regclient's per-host TLS path, which
+	// mutates the shared transport and must not undo the h2 opt-out.
+	protocolSeenByRegistry := func(disableHTTP2 bool) string {
+		var (
+			mu    sync.Mutex
+			proto string
+		)
+
+		server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			proto = r.Proto
+			mu.Unlock()
+
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		server.EnableHTTP2 = true
+		// EnableHTTP2 alone advertises only h2, which a client refusing it cannot negotiate at all.
+		// Offering both, as a real registry does, separates "picked HTTP/1.1" from "could not speak h2".
+		server.TLS = &tls.Config{NextProtos: []string{"h2", "http/1.1"}} //nolint: gosec // test server
+		server.StartTLS()
+
+		defer server.Close()
+
+		tlsVerify := false
+		conf := syncconf.RegistryConfig{
+			URLs:         []string{server.URL},
+			TLSVerify:    &tlsVerify,
+			DisableHTTP2: disableHTTP2,
+		}
+
+		client, _, err := newClient(conf, nil, log.NewTestLogger())
+		So(err, ShouldBeNil)
+
+		imageRef, err := ref.New(strings.TrimPrefix(server.URL, "https://") + "/repo:tag")
+		So(err, ShouldBeNil)
+
+		// a 404 is expected; we only care what protocol carried the request
+		_, _ = client.ManifestHead(context.Background(), imageRef)
+
+		mu.Lock()
+		defer mu.Unlock()
+
+		return proto
+	}
+
+	Convey("An h2-capable upstream is used over HTTP/2 by default", t, func() {
+		So(protocolSeenByRegistry(false), ShouldEqual, "HTTP/2.0")
+	})
+
+	Convey("disableHTTP2 forces HTTP/1.1 even against an h2-capable upstream", t, func() {
+		So(protocolSeenByRegistry(true), ShouldEqual, "HTTP/1.1")
+	})
+
+	// Guards the ALPN pin in newClient: without it the h2 the global advertises reaches the upstream.
+	Convey("disableHTTP2 holds when DefaultTransport already advertises h2", t, func() {
+		defaultTransport, ok := http.DefaultTransport.(*http.Transport)
+		So(ok, ShouldBeTrue)
+
+		originalTLSConfig := defaultTransport.TLSClientConfig
+		defer func() { defaultTransport.TLSClientConfig = originalTLSConfig }()
+
+		// Stated outright rather than provoked by a request, so the precondition cannot depend on what
+		// else has run in this process. This is the state Go leaves the global in.
+		defaultTransport.TLSClientConfig = &tls.Config{
+			MinVersion: tls.VersionTLS12,
+			NextProtos: []string{"h2", "http/1.1"},
+		}
+
+		So(protocolSeenByRegistry(true), ShouldEqual, "HTTP/1.1")
 	})
 }

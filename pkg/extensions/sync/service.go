@@ -4,6 +4,7 @@ package sync
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net/http"
@@ -987,8 +988,7 @@ func newClient(opts syncconf.RegistryConfig, credentials syncconf.CredentialsFil
 	}
 
 	// set TLS configuration
-	tls := getTLSConfigOption(urls[0], opts.TLSVerify)
-	hostConfig.TLS = tls
+	hostConfig.TLS = getTLSConfigOption(urls[0], opts.TLSVerify)
 
 	if opts.CertDir != "" {
 		clientCert, clientKey, regCert, err := getCertificates(opts.CertDir)
@@ -1060,6 +1060,24 @@ func newClient(opts syncconf.RegistryConfig, credentials syncconf.CredentialsFil
 	// which are separate component timeouts. Doesn't cover body transfer time, which is expected
 	// to be slow for large images.
 	transport.ResponseHeaderTimeout = opts.ResponseHeaderTimeout
+
+	// One connection per in-flight request, so ReqConcurrent parallelizes across TCP flows instead of
+	// h2 streams sharing one congestion window. A non-nil TLSNextProto is what disables h2 here;
+	// ForceAttemptHTTP2 is cleared to keep the two consistent.
+	if opts.DisableHTTP2 {
+		transport.ForceAttemptHTTP2 = false
+		transport.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
+
+		// Unregistering the RoundTripper does not stop the handshake from offering h2: Clone seeds
+		// DefaultTransport's process-global TLSClientConfig with h2 before copying it. Left that way
+		// the upstream selects h2 on a connection this client speaks HTTP/1.1 on, and every request
+		// dies on a malformed response. Clone deep-copies the config, so pinning cannot reach the global.
+		if transport.TLSClientConfig == nil {
+			transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+		}
+
+		transport.TLSClientConfig.NextProtos = []string{"http/1.1"}
+	}
 
 	// Use SyncTimeout for overall HTTP client timeout. This is the maximum time for the entire
 	// HTTP request, covering all stages: DialContext (connection establishment), TLSHandshakeTimeout

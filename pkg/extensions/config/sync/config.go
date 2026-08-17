@@ -80,6 +80,10 @@ type RegistryConfig struct {
 	// upstream registry and to each of its mirrors (a per-host cap, not a shared total across hosts).
 	// When unset it defaults to regclient's default (0, i.e. unlimited).
 	ReqPerSec *float64
+	// DisableHTTP2 forces HTTP/1.1 against this registry. HTTP/2 multiplexes every request onto one
+	// TCP connection, so ReqConcurrent divides a single congestion window rather than adding flows;
+	// on a long or lossy path, a connection per in-flight request can be substantially faster.
+	DisableHTTP2 bool
 }
 
 // OAuth2HelperConfig holds the options used by the "oauth2" credential helper,

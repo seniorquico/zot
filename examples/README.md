@@ -1401,6 +1401,7 @@ Configure each registry sync:
 				"maxRetryDelay": "30s",             # max HTTP retry backoff; optional, defaults to retryDelay (fixed interval). Set higher than retryDelay for exponential backoff.
 				"reqConcurrent": 30,                # max concurrent in-flight requests per host, applied independently to this upstream and to each of its mirrors, not shared across them (default: 3); raise it when one zot proxies many concurrent on-demand pulls from a single upstream
 				"reqPerSec": 100,                   # max request rate (requests/second) per host, applied independently to this upstream and to each of its mirrors, not shared across them (default: unlimited)
+				"disableHTTP2": true,               # don't negotiate HTTP/2 with this registry (default: false, so HTTP/2 is used when offered). HTTP/2 multiplexes every request over a single TCP connection, so all of reqConcurrent shares one congestion window and a single lost packet stalls every in-flight blob. Disabling it gives each in-flight request its own connection, which on a long or lossy path can raise aggregate throughput substantially, at the cost of up to reqConcurrent connections to the upstream.
 				"onlySigned": true,                 # sync only signed images (either notary or cosign)
 				"content":[                         # which content to periodically pull, also it's used for filtering ondemand images, if not set then periodically polling will not run
 					{
