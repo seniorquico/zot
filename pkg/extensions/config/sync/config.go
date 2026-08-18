@@ -80,7 +80,8 @@ type RegistryConfig struct {
 	// every slot for as long as they take to transfer.
 	//
 	// See examples/README.md for the costs of raising it, and for the symptom starvation presents with.
-	ReqConcurrent *int
+	// The width matches regclient's config.Host.ReqConcurrent, which this is assigned to directly.
+	ReqConcurrent *int64
 	// ReqPerSec caps the request rate (requests/second) per upstream host, applied independently to the
 	// upstream registry and to each of its mirrors (a per-host cap, not a shared total across hosts).
 	// When unset, or set to 0, the rate is unlimited, which is regclient's default.

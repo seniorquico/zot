@@ -2081,7 +2081,7 @@ func TestNewClientReqConcurrentReqPerSec(t *testing.T) {
 		})
 
 		Convey("Set values override the defaults on the main host", func() {
-			reqConcurrent := 42
+			reqConcurrent := int64(42)
 			reqPerSec := 100.0
 			opts := syncconf.RegistryConfig{
 				URLs:          []string{"http://localhost:9000"},
@@ -2092,12 +2092,12 @@ func TestNewClientReqConcurrentReqPerSec(t *testing.T) {
 			_, hosts, err := newClient(opts, syncconf.CredentialsFile{}, logger)
 			So(err, ShouldBeNil)
 			So(hosts, ShouldNotBeEmpty)
-			So(hosts[0].ReqConcurrent, ShouldEqual, int64(reqConcurrent))
+			So(hosts[0].ReqConcurrent, ShouldEqual, reqConcurrent)
 			So(hosts[0].ReqPerSec, ShouldEqual, reqPerSec)
 		})
 
 		Convey("Mirrors inherit the configured limits", func() {
-			reqConcurrent := 20
+			reqConcurrent := int64(20)
 			reqPerSec := 50.0
 			opts := syncconf.RegistryConfig{
 				// first URL is the main host, the rest are mirrors
@@ -2110,7 +2110,7 @@ func TestNewClientReqConcurrentReqPerSec(t *testing.T) {
 			So(err, ShouldBeNil)
 			So(len(hosts), ShouldEqual, 2)
 			for _, host := range hosts {
-				So(host.ReqConcurrent, ShouldEqual, int64(reqConcurrent))
+				So(host.ReqConcurrent, ShouldEqual, reqConcurrent)
 				So(host.ReqPerSec, ShouldEqual, reqPerSec)
 			}
 		})
@@ -2120,7 +2120,7 @@ func TestNewClientReqConcurrentReqPerSec(t *testing.T) {
 // observeMaxInFlight fires callers concurrent requests at a registry built by newClient with the
 // given reqConcurrent, and reports how many of them the registry ever saw in flight at once along
 // with the total number of requests it served.
-func observeMaxInFlight(reqConcurrent, callers int) (int, int) {
+func observeMaxInFlight(reqConcurrent int64, callers int) (int, int) {
 	var (
 		mu           sync.Mutex
 		inFlight     int
@@ -2256,7 +2256,7 @@ func TestNewClientReusesConnectionsUpToReqConcurrent(t *testing.T) {
 
 		defer server.Close()
 
-		concurrent := reqConcurrent
+		concurrent := int64(reqConcurrent)
 		opts := syncconf.RegistryConfig{
 			URLs:          []string{server.URL},
 			ReqConcurrent: &concurrent,

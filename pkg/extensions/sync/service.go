@@ -979,7 +979,7 @@ func newClient(opts syncconf.RegistryConfig, credentials syncconf.CredentialsFil
 	// mirror, so the effective cap is per host, not a shared total across the upstream and its mirrors.
 	// When unset, regclient's defaults are kept (ReqConcurrent=3, ReqPerSec=0 i.e. unlimited).
 	if opts.ReqConcurrent != nil {
-		hostConfig.ReqConcurrent = int64(*opts.ReqConcurrent)
+		hostConfig.ReqConcurrent = *opts.ReqConcurrent
 	}
 
 	if opts.ReqPerSec != nil {
