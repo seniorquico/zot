@@ -74,7 +74,12 @@ type RegistryConfig struct {
 	// independently to the upstream registry and to each of its mirrors (regclient copies it onto every
 	// host), so it is a per-host cap, not a shared total across hosts. When unset it defaults to
 	// regclient's default (3). Raising it helps when a single zot proxies many concurrent on-demand pulls
-	// of different images from one upstream, where the default causes head-of-line blocking.
+	// of different images from one upstream. regclient already hands the next free slot to a small
+	// non-blob request ahead of a queued blob, so what the default runs out of is slots, not fairness: a
+	// request holds its slot until its response body has been read, so a few large layers can occupy
+	// every slot for as long as they take to transfer.
+	//
+	// See examples/README.md for the costs of raising it, and for the symptom starvation presents with.
 	ReqConcurrent *int
 	// ReqPerSec caps the request rate (requests/second) per upstream host, applied independently to the
 	// upstream registry and to each of its mirrors (a per-host cap, not a shared total across hosts).

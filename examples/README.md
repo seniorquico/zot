@@ -1399,7 +1399,7 @@ Configure each registry sync:
 				"maxRetries": 5,                    # maxRetries in case of temporary errors (default: no retries)
 				"retryDelay": "1s",                 # initial HTTP retry delay; mandatory when using maxRetries
 				"maxRetryDelay": "30s",             # max HTTP retry backoff; optional, defaults to retryDelay (fixed interval). Set higher than retryDelay for exponential backoff.
-				"reqConcurrent": 30,                # max concurrent in-flight requests per host, applied independently to this upstream and to each of its mirrors, not shared across them (default: 3); raise it when one zot proxies many concurrent on-demand pulls from a single upstream
+				"reqConcurrent": 30,                # max in-flight requests per host, applied independently to this upstream and to each of its mirrors, not shared across them (default: 3). See "Sync's reqConcurrent and reqPerSec options" below before raising it.
 				"reqPerSec": 100,                   # max request rate (requests/second) per host, applied independently to this upstream and to each of its mirrors, not shared across them (default: unlimited)
 				"onlySigned": true,                 # sync only signed images (either notary or cosign)
 				"content":[                         # which content to periodically pull, also it's used for filtering ondemand images, if not set then periodically polling will not run
@@ -1478,6 +1478,37 @@ local. Notes:
  - requests by digest are unaffected, a locally present digest is already served without contacting upstream
  - a local miss, for instance after garbage collection, always falls back to a normal sync
  - the last check time is kept in memory, so the first request after a restart checks upstream again
+
+### Sync's reqConcurrent and reqPerSec options
+
+`reqConcurrent` caps the requests sync keeps in flight against one upstream host, and `reqPerSec`
+caps the rate it sends them. Both are per host: the value is applied independently to the upstream
+and to each of its mirrors, not shared across them.
+
+```
+			"registries": [{
+				"urls": ["https://registry-1.docker.io"],
+				"onDemand": true,
+				"reqConcurrent": 30,
+				"reqPerSec": 100
+			}]
+```
+
+The default `reqConcurrent` of 3 is sized for copying one image at a time. A request holds its slot
+until the response body has been fully read, so on a registry fronting on-demand pulls for many
+repositories a few large layers can hold every slot while everything else waits. Raising it is the
+fix for that, with three things worth knowing:
+
+ - a request that never gets a slot fails with the sync context's error, not a transport error, and
+   has transferred nothing. Starvation therefore reports `context deadline exceeded` after
+   `syncTimeout`, which is indistinguishable from an upstream that went unreachable. A sync that
+   times out having moved no bytes, on a link with headroom to spare, is the signature to look for
+ - concurrency divides the available bandwidth rather than adding to it. Past what the link to
+   upstream can carry, a larger value only shrinks each transfer's share, which can push a large
+   layer back past `syncTimeout` by a different route
+ - a raised `reqConcurrent` can trade starvation for upstream rate limiting. Sync retries `429`
+   responses and honours `Retry-After`, but a registry that throttles persistently will still fail
+   the sync; `reqPerSec` is the way to stay under such a limit
 
 ### Sync's certDir option
 
