@@ -2116,6 +2116,101 @@ func TestNewClientReqConcurrentReqPerSec(t *testing.T) {
 	})
 }
 
+// observeMaxInFlight fires callers concurrent requests at a registry built by newClient with the
+// given reqConcurrent, and reports how many of them the registry ever saw in flight at once along
+// with the total number of requests it served.
+func observeMaxInFlight(reqConcurrent, callers int) (int, int) {
+	var (
+		mu           sync.Mutex
+		inFlight     int
+		maxInFlight  int
+		requestCount int
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		inFlight++
+		requestCount++
+
+		if inFlight > maxInFlight {
+			maxInFlight = inFlight
+		}
+		mu.Unlock()
+
+		// hold the throttle slot long enough that unthrottled callers would overlap
+		time.Sleep(30 * time.Millisecond)
+
+		mu.Lock()
+		inFlight--
+		mu.Unlock()
+
+		if r.URL.Path == "/v2/" {
+			w.WriteHeader(http.StatusOK)
+
+			return
+		}
+
+		// not retryable, so each caller makes a predictable number of requests
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	opts := syncconf.RegistryConfig{
+		URLs:          []string{server.URL},
+		ReqConcurrent: &reqConcurrent,
+	}
+
+	client, _, err := newClient(opts, syncconf.CredentialsFile{}, log.NewTestLogger())
+	So(err, ShouldBeNil)
+
+	imageRef, err := ref.New(strings.TrimPrefix(server.URL, "http://") + "/repo:tag")
+	So(err, ShouldBeNil)
+
+	var waitGroup sync.WaitGroup
+
+	for range callers {
+		waitGroup.Add(1)
+
+		go func() {
+			defer waitGroup.Done()
+
+			// errors are expected (404), only the overlap matters here
+			_, _ = client.ManifestHead(context.Background(), imageRef)
+		}()
+	}
+
+	waitGroup.Wait()
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	return maxInFlight, requestCount
+}
+
+// TestNewClientReqConcurrentThrottlesRequests checks that reqConcurrent reaches regclient's
+// per-host throttle rather than only landing in a config.Host field. newClient returns the same
+// slice of hosts it passed to regclient, so asserting on those fields cannot tell a wired-up
+// throttle from one that was dropped on the way in: regclient's config.Host.Merge only applies
+// ReqConcurrent when the incoming value is greater than zero, and hosts loaded from a docker
+// config arrive carrying the default of 3, so the relative order of WithDockerCreds and
+// WithConfigHost in newClient silently decides whether the configured value survives.
+func TestNewClientReqConcurrentThrottlesRequests(t *testing.T) {
+	Convey("reqConcurrent caps the requests in flight against an upstream registry", t, func() {
+		maxInFlight, requestCount := observeMaxInFlight(1, 4)
+
+		// requestCount proves the requests really reached the server, so the overlap check isn't vacuous
+		So(requestCount, ShouldBeGreaterThan, 1)
+		So(maxInFlight, ShouldEqual, 1)
+	})
+
+	Convey("a higher reqConcurrent lets requests overlap, so the cap above is doing the work", t, func() {
+		maxInFlight, requestCount := observeMaxInFlight(4, 4)
+
+		So(requestCount, ShouldBeGreaterThan, 1)
+		So(maxInFlight, ShouldBeGreaterThan, 1)
+	})
+}
+
 func TestHTTPRetryDelayBounds(t *testing.T) {
 	Convey("httpRetryDelayBounds maps sync config to regclient delay args", t, func() {
 		retryDelay := 1 * time.Second
