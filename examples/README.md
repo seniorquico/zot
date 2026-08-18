@@ -1400,7 +1400,7 @@ Configure each registry sync:
 				"retryDelay": "1s",                 # initial HTTP retry delay; mandatory when using maxRetries
 				"maxRetryDelay": "30s",             # max HTTP retry backoff; optional, defaults to retryDelay (fixed interval). Set higher than retryDelay for exponential backoff.
 				"reqConcurrent": 30,                # max in-flight requests per host, applied independently to this upstream and to each of its mirrors, not shared across them (default: 3). See "Sync's reqConcurrent and reqPerSec options" below before raising it.
-				"reqPerSec": 100,                   # max request rate (requests/second) per host, applied independently to this upstream and to each of its mirrors, not shared across them (default: unlimited)
+				"reqPerSec": 100,                   # max request rate (requests/second) per host, applied independently to this upstream and to each of its mirrors, not shared across them (default: unlimited, which 0 also selects)
 				"onlySigned": true,                 # sync only signed images (either notary or cosign)
 				"content":[                         # which content to periodically pull, also it's used for filtering ondemand images, if not set then periodically polling will not run
 					{
@@ -1483,7 +1483,8 @@ local. Notes:
 
 `reqConcurrent` caps the requests sync keeps in flight against one upstream host, and `reqPerSec`
 caps the rate it sends them. Both are per host: the value is applied independently to the upstream
-and to each of its mirrors, not shared across them.
+and to each of its mirrors, not shared across them. Leaving `reqPerSec` unset, or setting it to 0,
+leaves the rate unlimited.
 
 ```
 			"registries": [{

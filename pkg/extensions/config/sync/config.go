@@ -83,7 +83,7 @@ type RegistryConfig struct {
 	ReqConcurrent *int
 	// ReqPerSec caps the request rate (requests/second) per upstream host, applied independently to the
 	// upstream registry and to each of its mirrors (a per-host cap, not a shared total across hosts).
-	// When unset it defaults to regclient's default (0, i.e. unlimited).
+	// When unset, or set to 0, the rate is unlimited, which is regclient's default.
 	ReqPerSec *float64
 }
 

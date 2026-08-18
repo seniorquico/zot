@@ -1794,11 +1794,11 @@ func validateSyncRegistry(config *config.Config, regID int, regCfg syncconf.Regi
 	return validateSyncContent(config, regCfg, logger)
 }
 
-// invalidOptionalPositiveFloat reports whether an optional float setting is set to a value that is
-// not a finite number strictly greater than zero. NaN and +/-Inf bypass a naive `*v <= 0` check
-// (NaN compares false against everything), so they are rejected explicitly.
-func invalidOptionalPositiveFloat(value *float64) bool {
-	return value != nil && (*value <= 0 || math.IsNaN(*value) || math.IsInf(*value, 0))
+// invalidOptionalNonNegativeFloat reports whether an optional float setting is set to a value that
+// is not a finite number greater than or equal to zero. NaN and +/-Inf bypass a naive `*v < 0`
+// check (NaN compares false against everything), so they are rejected explicitly.
+func invalidOptionalNonNegativeFloat(value *float64) bool {
+	return value != nil && (*value < 0 || math.IsNaN(*value) || math.IsInf(*value, 0))
 }
 
 func validateSyncReqLimits(regID int, regCfg syncconf.RegistryConfig, logger zlog.Logger) error {
@@ -1810,8 +1810,10 @@ func validateSyncReqLimits(regID int, regCfg syncconf.RegistryConfig, logger zlo
 		return fmt.Errorf("%w: %s", zerr.ErrBadConfig, msg)
 	}
 
-	if invalidOptionalPositiveFloat(regCfg.ReqPerSec) {
-		msg := "reqPerSec must be a finite value greater than 0"
+	// 0 is accepted and means unlimited, which is both the documented default and what regclient
+	// does with it, so a generated config can render the default without being rejected for it.
+	if invalidOptionalNonNegativeFloat(regCfg.ReqPerSec) {
+		msg := "reqPerSec must be a finite value greater than or equal to 0"
 		logger.Error().Err(zerr.ErrBadConfig).Int("id", regID).Interface("extensions.sync.registries[id]",
 			regCfg).Msg(msg)
 

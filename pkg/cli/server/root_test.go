@@ -2017,7 +2017,20 @@ storage:
 		So(err, ShouldNotBeNil)
 	})
 
-	Convey("Test verify with non-positive sync reqPerSec", t, func(c C) {
+	Convey("Test verify with negative sync reqPerSec", t, func(c C) {
+		content := `{"storage":{"rootDirectory":"/tmp/zot"},
+							"http":{"address":"127.0.0.1","port":"8080","realm":"zot",
+							"auth":{"htpasswd":{"path":"test/data/htpasswd"},"failDelay":1}},
+							"extensions":{"sync": {"registries": [{"urls":["localhost:9999"],
+							"reqPerSec": -1}]}}}`
+		tmpfile := MakeTempFileWithContent(t, "zot-test.json", content)
+
+		os.Args = []string{"cli_test", "verify", tmpfile}
+		err := cli.NewServerRootCmd().Execute()
+		So(err, ShouldNotBeNil)
+	})
+
+	Convey("Test verify accepts sync reqPerSec 0 as explicitly unlimited", t, func(c C) {
 		content := `{"storage":{"rootDirectory":"/tmp/zot"},
 							"http":{"address":"127.0.0.1","port":"8080","realm":"zot",
 							"auth":{"htpasswd":{"path":"test/data/htpasswd"},"failDelay":1}},
@@ -2027,7 +2040,7 @@ storage:
 
 		os.Args = []string{"cli_test", "verify", tmpfile}
 		err := cli.NewServerRootCmd().Execute()
-		So(err, ShouldNotBeNil)
+		So(err, ShouldBeNil)
 	})
 
 	Convey("Test verify rejects non-finite sync reqPerSec", t, func(c C) {
