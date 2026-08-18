@@ -1061,6 +1061,22 @@ func newClient(opts syncconf.RegistryConfig, credentials syncconf.CredentialsFil
 	// to be slow for large images.
 	transport.ResponseHeaderTimeout = opts.ResponseHeaderTimeout
 
+	// Size the idle connection pool from the request throttle. DefaultTransport leaves
+	// MaxIdleConnsPerHost at 0, which means net/http keeps only DefaultMaxIdleConnsPerHost (2)
+	// connections per host, so any request beyond the second has nothing to reuse and pays for a
+	// fresh TCP connection and TLS handshake. That is already below regclient's default
+	// ReqConcurrent of 3 and gets worse the higher reqConcurrent is raised, which cancels out part
+	// of what raising it was meant to buy. HTTP/2 upstreams multiplex onto one connection and are
+	// unaffected; HTTP/1.1 upstreams are where this shows up.
+	transport.MaxIdleConnsPerHost = int(hostConfig.ReqConcurrent)
+
+	// MaxIdleConns is the pool across every host this transport talks to, so it has to cover the
+	// upstream and each of its mirrors to leave the per-host limit above reachable. Only ever
+	// raise it, and ignore an overflowed product from an absurd reqConcurrent.
+	if maxIdleConns := int(hostConfig.ReqConcurrent) * len(hostConfigOpts); maxIdleConns > transport.MaxIdleConns {
+		transport.MaxIdleConns = maxIdleConns
+	}
+
 	// Use SyncTimeout for overall HTTP client timeout. This is the maximum time for the entire
 	// HTTP request, covering all stages: DialContext (connection establishment), TLSHandshakeTimeout
 	// (TLS handshake), ResponseHeaderTimeout (waiting for headers), and body transfer time.

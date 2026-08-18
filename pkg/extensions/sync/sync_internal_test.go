@@ -12,6 +12,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -2208,6 +2209,90 @@ func TestNewClientReqConcurrentThrottlesRequests(t *testing.T) {
 
 		So(requestCount, ShouldBeGreaterThan, 1)
 		So(maxInFlight, ShouldBeGreaterThan, 1)
+	})
+}
+
+// TestNewClientReusesConnectionsUpToReqConcurrent checks that the idle connection pool is sized
+// from reqConcurrent, so concurrent requests reuse connections instead of dialling a new one each
+// time. Without it net/http keeps DefaultMaxIdleConnsPerHost (2) idle connections per host and
+// every request past the second pays for a fresh TCP connection and TLS handshake.
+func TestNewClientReusesConnectionsUpToReqConcurrent(t *testing.T) {
+	Convey("Test newClient keeps connections alive for a raised reqConcurrent", t, func() {
+		const (
+			reqConcurrent = 8
+			rounds        = 5
+		)
+
+		var (
+			mu           sync.Mutex
+			newConns     int
+			requestCount int
+		)
+
+		server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			requestCount++
+			mu.Unlock()
+
+			// overlap the requests within a round so all reqConcurrent slots are in use
+			time.Sleep(20 * time.Millisecond)
+
+			if r.URL.Path == "/v2/" {
+				w.WriteHeader(http.StatusOK)
+
+				return
+			}
+
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		server.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+			if state == http.StateNew {
+				mu.Lock()
+				newConns++
+				mu.Unlock()
+			}
+		}
+		server.Start()
+
+		defer server.Close()
+
+		concurrent := reqConcurrent
+		opts := syncconf.RegistryConfig{
+			URLs:          []string{server.URL},
+			ReqConcurrent: &concurrent,
+		}
+
+		client, _, err := newClient(opts, syncconf.CredentialsFile{}, log.NewTestLogger())
+		So(err, ShouldBeNil)
+
+		imageRef, err := ref.New(strings.TrimPrefix(server.URL, "http://") + "/repo:tag")
+		So(err, ShouldBeNil)
+
+		for range rounds {
+			var waitGroup sync.WaitGroup
+
+			for range reqConcurrent {
+				waitGroup.Add(1)
+
+				go func() {
+					defer waitGroup.Done()
+
+					// errors are expected (404), only the connection accounting matters here
+					_, _ = client.ManifestHead(context.Background(), imageRef)
+				}()
+			}
+
+			waitGroup.Wait()
+		}
+
+		mu.Lock()
+		defer mu.Unlock()
+
+		// every round really ran, so the connection bound below isn't vacuous
+		So(requestCount, ShouldBeGreaterThanOrEqualTo, rounds*reqConcurrent)
+
+		// the first round dials up to reqConcurrent connections, every later round reuses them
+		So(newConns, ShouldBeLessThanOrEqualTo, reqConcurrent)
 	})
 }
 
